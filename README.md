@@ -2,6 +2,9 @@
 プレイはこちらから
 (https://akapikumindayo.github.io/jukugo-rebulding/)
 
+紹介映像を作っています
+https://youtu.be/pnHfKPX98h0
+
 概要
 お題の熟語を作るゲームです。
 お題の熟語の読みが出るので漢字を並び替えてお題の熟語を作りましょう。
