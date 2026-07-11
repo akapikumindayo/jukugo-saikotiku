@@ -1,6 +1,6 @@
 # jukugo-saikotiku
 プレイはこちらから↓
-
+(https://akapikumindayo.github.io/jukugo-saikotiku/)
 
 概要
 お題の熟語を作るゲームです。
