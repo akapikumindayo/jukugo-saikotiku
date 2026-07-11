@@ -1,5 +1,5 @@
 # jukugo-saikotiku
-プレイはこちらから↓
+プレイはこちらから
 (https://akapikumindayo.github.io/jukugo-saikotiku/)
 
 概要
