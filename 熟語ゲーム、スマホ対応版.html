@@ -1,0 +1,796 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>熟語再構築 - Strategy Edition</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        @import url('https://fonts.googleapis.com/css2?family=Noto+Serif+JP:wght@700&display=swap');
+
+        body {
+            background-color: #f0f4f8;
+            font-family: 'Helvetica Neue', Arial, sans-serif;
+            overflow: hidden;
+            touch-action: none;
+            height: 100vh;
+            width: 100vw;
+            margin: 0;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            transition: background-color 0.3s, color 0.3s;
+        }
+
+        .kanji-font {
+            font-family: 'Noto Serif JP', serif;
+        }
+
+        .drop-slot {
+            width: 50px;
+            height: 50px;
+            border: 2px dashed #cbd5e1;
+            border-radius: 8px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background-color: rgba(255, 255, 255, 0.9);
+            position: relative;
+        }
+
+        @media (min-width: 640px) {
+            .drop-slot { width: 68px; height: 68px; border-radius: 12px; }
+        }
+
+        .drop-slot.active {
+            border-color: #6366f1;
+            background-color: #e0e7ff;
+            transform: scale(1.05);
+        }
+
+        .kanji-card {
+            width: 46px;
+            height: 46px;
+            background-color: white;
+            border: 2px solid #6366f1;
+            border-radius: 8px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 1.4rem;
+            font-weight: bold;
+            box-shadow: 0 4px 6px -1px rgb(0 0 0 / 0.1);
+            user-select: none;
+            touch-action: none;
+            position: absolute;
+            z-index: 10;
+            cursor: grab;
+            color: #1e293b;
+        }
+
+        @media (min-width: 640px) {
+            .kanji-card { width: 64px; height: 64px; font-size: 1.8rem; border-radius: 12px; }
+        }
+
+        .dragging {
+            position: fixed !important;
+            z-index: 9999 !important;
+            box-shadow: 0 20px 40px rgba(0,0,0,0.3);
+            opacity: 0.95;
+            pointer-events: none;
+            transform: scale(1.1) rotate(0deg) !important;
+        }
+
+        .placed {
+            position: relative !important;
+            left: 0 !important;
+            top: 0 !important;
+            transform: none !important;
+            z-index: 5;
+            box-shadow: none;
+        }
+
+        .returning {
+            transition: all 0.3s cubic-bezier(0.25, 1, 0.5, 1) !important;
+            z-index: 50 !important;
+        }
+
+        #scatter-area {
+            position: relative;
+            flex-grow: 1;
+            width: 100%;
+            background-color: #f8fafc;
+            border-top: 4px solid #e2e8f0;
+            overflow: hidden;
+        }
+
+        #archive-screen {
+            position: fixed;
+            inset: 0;
+            background-color: white;
+            z-index: 2000;
+            display: none;
+            flex-direction: column;
+            color: #1e293b;
+        }
+    </style>
+</head>
+<body>
+
+    <div id="game-container" class="max-w-2xl w-full h-full flex flex-col bg-white shadow-2xl overflow-hidden">
+        <div class="bg-indigo-600 p-3 text-white flex justify-between items-center shrink-0 shadow-md">
+            <div class="flex gap-2">
+                <button id="open-archive-btn" class="text-xs bg-indigo-500 hover:bg-indigo-400 px-3 py-1 rounded-full transition-colors font-bold">熟語帳</button>
+                <button onclick="toggleDarkMode()" class="text-xs bg-indigo-800 hover:bg-indigo-700 px-3 py-1 rounded-full transition-colors font-bold">🌙/☀️</button>
+            </div>
+            <h1 class="text-md font-bold italic">熟語再構築</h1>
+            <div id="remaining-count" class="text-[10px] text-indigo-200 font-bold uppercase tracking-wider">Loading...</div>
+        </div>
+
+        <div class="flex justify-between px-4 py-2 bg-indigo-50 text-indigo-800 font-bold border-b border-indigo-100 shrink-0">
+            <div class="text-sm">STAGE: <span id="current-level-display">1</span></div>
+            <div id="word-info" class="text-xs bg-white px-3 py-1 rounded-full shadow-sm text-indigo-600 flex items-center italic">正解：?文字</div>
+            <div class="text-sm">SCORE: <span id="score-display">0</span></div>
+        </div>
+
+        <div id="ui-top-area" class="p-4 shrink-0 relative z-20 bg-white">
+            <div id="question-hint" class="text-center text-gray-600 mb-4 italic text-sm font-bold min-h-[1.5rem]"></div>
+            <div id="answer-area" class="flex flex-wrap justify-center gap-2 mb-6 min-h-[60px]"></div>
+
+            <div id="message-area" class="hidden text-center p-3 bg-green-50 rounded-xl mb-4 border border-green-200">
+                <div id="answer-reading" class="text-md font-bold text-green-700"></div>
+                <div id="answer-meaning" class="text-xs text-green-600 mt-1 leading-tight"></div>
+            </div>
+
+            <div class="flex flex-col gap-2">
+                <button id="check-btn" class="w-full bg-indigo-600 hover:bg-indigo-700 text-white font-bold py-4 rounded-xl shadow-lg transition-all active:scale-95 text-lg">回答する</button>
+                <div class="flex gap-2">
+                    <button id="reroll-btn" class="flex-1 bg-amber-500 hover:bg-amber-600 text-white font-bold py-2 rounded-lg text-sm shadow-md transition-colors">別の問題</button>
+                    <button id="next-btn" class="hidden flex-1 bg-green-500 hover:bg-green-600 text-white font-bold py-2 rounded-lg text-sm shadow-lg">次へ進む</button>
+                </div>
+            </div>
+        </div>
+
+        <div id="scatter-area"></div>
+    </div>
+
+    <div id="archive-screen">
+        <div class="bg-indigo-600 p-4 text-white flex justify-between items-center shadow-md">
+            <div class="flex items-center gap-4">
+                <h2 class="text-lg font-bold">クリア済みの熟語帳</h2>
+                <button id="reset-save-btn" class="text-[10px] bg-red-500 hover:bg-red-400 px-2 py-1 rounded transition-colors font-bold uppercase tracking-tighter">セーブリセット</button>
+            </div>
+            <button id="close-archive-btn" class="bg-white text-indigo-600 px-4 py-1 rounded-full font-bold shadow-sm">閉じる</button>
+        </div>
+        <div class="p-2 border-b bg-gray-50 flex gap-2">
+            <input type="text" id="archive-search" placeholder="熟語または読みで検索..." class="flex-grow p-2 border rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500">
+            <button id="fav-filter-btn" class="bg-white border border-gray-300 px-3 py-1 rounded-lg text-lg shadow-sm active:bg-yellow-50">☆</button>
+        </div>
+        <div id="archive-list-container" class="overflow-y-auto flex-grow p-2">
+            <div id="archive-list"></div>
+            <div id="empty-archive-msg" class="text-center py-10 text-gray-400">まだクリアした問題がありません</div>
+        </div>
+    </div>
+
+    <div id="start-menu" class="fixed inset-0 bg-slate-900 bg-opacity-95 flex items-center justify-center p-4 z-[1000000]">
+        <div class="bg-white p-8 rounded-3xl max-w-sm w-full text-center shadow-2xl">
+            <h2 class="text-3xl font-bold text-gray-800 mb-2 kanji-font">熟語再構築</h2>
+            <p class="text-indigo-600 font-bold mb-4">Ultimate Edition</p>
+            <p class="text-gray-500 mb-8 text-sm leading-relaxed">漢字で指定の四字熟語を作ってください</p>
+            <button onclick="startGame()" class="w-full bg-indigo-600 text-white font-bold py-4 rounded-2xl shadow-xl hover:bg-indigo-700 active:scale-95 transition-all text-xl">
+                ゲーム開始
+            </button>
+        </div>
+    </div>
+
+    <script>
+        const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
+        function playSound(type) {
+            if (audioCtx.state === 'suspended') audioCtx.resume();
+            const now = audioCtx.currentTime;
+            if (type === 'pick') {
+                const osc = audioCtx.createOscillator(); const gain = audioCtx.createGain();
+                osc.connect(gain); gain.connect(audioCtx.destination);
+                osc.frequency.setValueAtTime(400, now); osc.frequency.exponentialRampToValueAtTime(800, now + 0.05);
+                gain.gain.setValueAtTime(0.2, now); gain.gain.exponentialRampToValueAtTime(0.01, now + 0.1);
+                osc.start(); osc.stop(now + 0.1);
+            } else if (type === 'drop') {
+                const osc = audioCtx.createOscillator(); const gain = audioCtx.createGain();
+                osc.connect(gain); gain.connect(audioCtx.destination);
+                osc.frequency.setValueAtTime(300, now); gain.gain.setValueAtTime(0.1, now);
+                gain.gain.exponentialRampToValueAtTime(0.01, now + 0.1);
+                osc.start(); osc.stop(now + 0.1);
+            } else if (type === 'correct') {
+                [523, 659, 783].forEach((f, i) => {
+                    const o = audioCtx.createOscillator(); const g = audioCtx.createGain();
+                    o.connect(g); g.connect(audioCtx.destination);
+                    o.frequency.setValueAtTime(f, now + i * 0.1); g.gain.setValueAtTime(0.2, now + i * 0.1);
+                    g.gain.exponentialRampToValueAtTime(0.01, now + i * 0.1 + 0.3);
+                    o.start(now + i * 0.1); o.stop(now + i * 0.1 + 0.4);
+                });
+            } else if (type === 'wrong') {
+                const osc = audioCtx.createOscillator(); const gain = audioCtx.createGain();
+                osc.connect(gain); gain.connect(audioCtx.destination);
+                osc.type = 'sawtooth'; osc.frequency.setValueAtTime(100, now);
+                gain.gain.setValueAtTime(0.2, now); gain.gain.linearRampToValueAtTime(0.01, now + 0.3);
+                osc.start(); osc.stop(now + 0.3);
+            }
+        }
+
+        const dummyPool = "一二三四五六七八九十日月火水木金土天国人山川田花鳥風月春夏秋冬大小長短前後左右上下東西南北白黒赤青黄海森草原雲雨雪機械工はがへとば";
+        
+        // 熟語データ
+        const baseIdiomData = [
+            { word: "弱肉強食", reading: "じゃくにくきょうしょく", meaning: "強者が弱者を犠牲にして栄えること。" },
+            { word: "一期一会", reading: "いちごいちえ", meaning: "一生に一度きりの大切な出会いのこと。" },
+            { word: "猪突猛進", reading: "ちょとつもうしん", meaning: "目標に向かって猛烈に突き進むこと。" },
+            { word: "起死回生", reading: "きしかいせい", meaning: "絶望的な状態から一気に立て直すこと。" },
+            { word: "疑心暗鬼", reading: "ぎしんあんき", meaning: "疑う心があると何でも恐ろしく見えること。" },
+            { word: "切磋琢磨", reading: "せっさたくま", meaning: "互いに励まし合って向上すること。" },
+            { word: "油断大敵", reading: "ゆだんたいてき", meaning: "少しの油断が大きな失敗を招く。" },
+            { word: "以心伝心", reading: "いしんでんしん", meaning: "言葉を使わなくても心が通じ合うこと。" },
+            { word: "自業自得", reading: "じごうじとく", meaning: "自分の行いの報いを自分が受けること。" },
+            { word: "温故知新", reading: "おんこちしん", meaning: "古いことを学び新しい知識を得ること。" },
+            { word: "電光石火", reading: "でんこうせっか", meaning: "動きが非常に素早いことのたとえ。" },
+            { word: "森羅万象", reading: "しんらばんしょう", meaning: "宇宙に存在するすべてのもの。" },
+            { word: "十人十色", reading: "じゅうにんといろ", meaning: "考えや好みは人によってそれぞれ違うこと。" },
+            { word: "風林火山", reading: "ふうりんかざん", meaning: "戦いにおける四つの極意。" },
+            { word: "一石二鳥", reading: "いっせきにちょう", meaning: "一つのことで二つの利益を得ること。" },
+            { word: "喜怒哀楽", reading: "きどあいらく", meaning: "人間が持つ様々な感情のこと。" },
+            { word: "日進月歩", reading: "にっしんげっぽ", meaning: "絶え間なく急速に進歩すること。" },
+            { word: "絶体絶命", reading: "ぜったいぜつめい", meaning: "追い詰められて逃れられない困難な立場。" },
+            { word: "百聞一見", reading: "ひゃくぶんいっけん", meaning: "何度も聞くより一度見る方がよく分かる。" },
+            { word: "大器晩成", reading: "たいきばんせい", meaning: "大人物は普通より遅れて大成すること。" },
+            { word: "我田引水", reading: "がでんいんすい", meaning: "自分に都合の良いように物事を進める。" },
+            { word: "臥薪嘗胆", reading: "がしんしょうたん", meaning: "目的を果たすために苦難を耐え忍ぶこと。" },
+            { word: "暗中模索", reading: "あんちゅうもさく", meaning: "手がかりのない中であれこれ試みること。" },
+            { word: "単刀直入", reading: "たんとうちょくにゅう", meaning: "前置きなしでいきなり本題に入ること。" },
+            { word: "粉骨砕身", reading: "ふんこつさいしん", meaning: "力の限りを尽くして努力すること。" },
+            { word: "一長一短", reading: "いっちょういったん", meaning: "良い所もあるが悪い所もあるということ。" },
+            { word: "四面楚歌", reading: "しめんそか", meaning: "周りが敵ばかりで助けがない状態。" },
+            { word: "紆余曲折", reading: "うよきょくせつ", meaning: "事情が複雑にからみあって、解決に手間取ること。" },
+            { word: "言語道断", reading: "ごんごどうだん", meaning: "あまりにひどくて言葉も出ないこと。" },
+            { word: "悪戦苦闘", reading: "あくせんくとう", meaning: "困難な状況の中で、死に物狂いで努力すること。" },
+            { word: "異口同音", reading: "いくどうおん", meaning: "多くの人が、口をそろえて同じことを言うこと。" },
+            { word: "威風堂々", reading: "いふうどうどう", meaning: "態度や雰囲気に威厳があって立派な様子。" },
+            { word: "意味深長", reading: "いみしんちょう", meaning: "言葉の裏に深い意味が隠されていること。" },
+            { word: "因果応報", reading: "いんがおうほう", meaning: "よい行いにも悪い行いにも、必ず報いがあること。" },
+            { word: "栄枯盛衰", reading: "えいこせいすい", meaning: "栄えたり衰えたりすることの繰り返し。" },
+            { word: "傍若無人", reading: "ぼうじゃくぶじん", meaning: "そばに人がいないかのように勝手に振る舞うこと。" },
+            { word: "朝令暮改", reading: "ちょうれいぼかい", meaning: "命令や方針が頻繁に変わって定まらないこと。" },
+            { word: "徹頭徹尾", reading: "てっとうてつび", meaning: "最初から最後まで、方針を変えずに貫くこと。" },
+            { word: "付和雷同", reading: "ふわらいどう", meaning: "自分に考えがなく、他人の意見にすぐ同調すること。" },
+            { word: "公明正大", reading: "こうめいせいだい", meaning: "やましいことがなく、公平で正しいこと。" },
+            { word: "古色蒼然", reading: "こしょくそうぜん", meaning: "いかにも古びていて、趣がある様子。" },
+            { word: "豪華絢爛", reading: "ごうかけんらん", meaning: "きらびやかで贅沢、華やかな様子。" },
+            { word: "孤立無援", reading: "こりつむえん", meaning: "仲間がいなくて、助けてくれる人もいない状態。" },
+            { word: "五穀豊穣", reading: "ごこくほうじょう", meaning: "農作物が豊かに実ること。" },
+            { word: "言語明瞭", reading: "げんごめいりょう", meaning: "言葉のはっきりしていること。" },
+            { word: "才色兼備", reading: "さいしょくけんび", meaning: "すぐれた才能と美しい容姿の両方を持っていること。" },
+            { word: "三位一体", reading: "さんみいったい", meaning: "三つのものが一つにまとまること。" },
+            { word: "試行錯誤", reading: "しこうさくご", meaning: "失敗を繰り返しながら、正解に近づくこと。" },
+            { word: "七変化", reading: "しちへんげ", meaning: "さまざまに姿を変えること。" },
+            { word: "質実剛健", reading: "しつじつごうけん", meaning: "飾り気がなく、心身ともに強くたくましいこと。" },
+            { word: "自由奔放", reading: "じゆうほんぽう", meaning: "ルールに縛られず、思いのままに振る舞うこと。" },
+            { word: "主客転倒", reading: "しゅかくてんとう", meaning: "立場や順序が逆になること。" },
+            { word: "順風満帆", reading: "じゅんぷうまんぱん", meaning: "物事がすべて順調に進むこと。" },
+            { word: "諸行無常", reading: "しょぎょうむじょう", meaning: "この世のすべては常に移り変わるということ。" },
+            { word: "心機一転", reading: "しんきいってん", meaning: "気持ちをすっかり入れ替えること。" },
+            { word: "針小棒大", reading: "しんしょうぼうだい", meaning: "小さなことを大げさに言うこと。" },
+            { word: "正々堂々", reading: "せいせいどうどう", meaning: "卑怯なことをせず、立派な態度で臨むこと。" },
+            { word: "千載一遇", reading: "せんざいいちぐう", meaning: "めったにない絶好の機会。" },
+            { word: "千差万別", reading: "せんさばんべつ", meaning: "種類や様子がさまざまに異なること。" },
+            { word: "先義後利", reading: "せんぎこうり", meaning: "義理を先にし、利益を後にすること。" },
+            { word: "前代未聞", reading: "ぜんだいみもん", meaning: "これまでに聞いたことがないほど珍しいこと。" },
+            { word: "全力投球", reading: "ぜんりょくとうきゅう", meaning: "持てる力のすべてを出して物事にあたること。" },
+            { word: "相思相愛", reading: "そうしそうあい", meaning: "互いに慕い合い、愛し合っていること。" },
+            { word: "多士済々", reading: "たしせいせい", meaning: "すぐれた人材が多く集まっていること。" },
+            { word: "他力本願", reading: "たりきほんがん", meaning: "自分の力ではなく、他人の力をあてにすること。" },
+            { word: "朝三暮四", reading: "ちょうさんぼし", meaning: "目先の違いにこだわり、本質が同じだと気づかないこと。" },
+            { word: "適材適所", reading: "てきざいてきしょ", meaning: "その人の能力に合った地位や仕事につけること。" },
+            { word: "天衣無縫", reading: "てんいむほう", meaning: "自然で飾り気がなく、純真で無邪気なこと。" },
+            { word: "東奔西走", reading: "とうほんせいそう", meaning: "目的のためにあちこち忙しく走り回ること。" },
+            { word: "独立独歩", reading: "どくりつどっぽ", meaning: "他人に頼らず、自分の信じる道を進むこと。" },
+            { word: "南船北馬", reading: "なんせんほくば", meaning: "各地を忙しく旅すること。" },
+            { word: "二者択一", reading: "にしゃたくいつ", meaning: "二つのうち、どちらか一つを選ぶこと。" },
+            { word: "馬耳東風", reading: "ばじとうふう", meaning: "他人の意見を気にかけず聞き流すこと。" },
+            { word: "半信半疑", reading: "はんしんはんぎ", meaning: "本当かどうか迷っている状態。" },
+            { word: "不撓不屈", reading: "ふとうふくつ", meaning: "強い意志を持って、困難に屈しないこと。" },
+            { word: "不即不離", reading: "ふそくふり", meaning: "つかず離れずの関係を保つこと。" },
+            { word: "文武両道", reading: "ぶんぶりょうどう", meaning: "勉強とスポーツの両方にすぐれていること。" },
+            { word: "平身低頭", reading: "へいしんていとう", meaning: "ひたすら謝ったり、お願いしたりすること。" },
+            { word: "片言隻語", reading: "へんげんせきご", meaning: "ちょっとした短い言葉。" },
+            { word: "暴飲暴食", reading: "ぼういんぼうしょく", meaning: "むやみにお酒を飲んだり食べたりすること。" },
+            { word: "抱腹絶倒", reading: "ほうふくぜっとう", meaning: "お腹を抱えて大笑いすること。" },
+            { word: "摩訶不思議", reading: "まかふしぎ", meaning: "非常に不思議な様子。" },
+            { word: "無我夢中", reading: "むがむちゅう", meaning: "自分を忘れるほど何かに熱中すること。" },
+            { word: "無味乾燥", reading: "むみかんそう", meaning: "面白みや味わいがないこと。" },
+            { word: "有名無実", reading: "ゆうめいむじつ", meaning: "名前ばかり立派で、中身が伴っていないこと。" },
+            { word: "勇猛果敢", reading: "ゆうもうかかん", meaning: "勇ましくて決断力があること。" },
+            { word: "悠々自適", reading: "ゆうゆうじてき", meaning: "世俗の束縛を受けず、のんびりと暮らすこと。" },
+            { word: "用意周到", reading: "よういしゅうとう", meaning: "準備がすみずみまで行き届いていること。" },
+            { word: "一蓮托生", reading: "いちれんたくしょう", meaning: "結果がどうなろうと行動を共にすること。" },
+            { word: "一喜一憂", reading: "いっきいちゆう", meaning: "状況が変わるたびに喜んだり心配したりすること。" },
+            { word: "一網打尽", reading: "いちもうだじん", meaning: "一度に一味をすべて捕らえること。" },
+            { word: "一意専心", reading: "いちいせんしん", meaning: "一つのことに心を集中させること。" },
+            { word: "一心同体", reading: "いっしんどうたい", meaning: "二人以上の人が心を一つにすること。" },
+            { word: "一日千秋", reading: "いちじつせんしゅう", meaning: "待ち遠しくて、一日が長く感じられること。" },
+            { word: "一挙両得", reading: "いっきょりょうとく", meaning: "一つの行動で二つの利益を得ること。" },
+            { word: "厚顔無恥", reading: "こうがんむち", meaning: "図々しくて恥を知らないこと。" },
+            { word: "国士無双", reading: "こくしむそう", meaning: "国の中で並ぶ者がいないほど優れた人物。" },
+            { word: "呉越同舟", reading: "ごえつどうしゅう", meaning: "敵味方が同じ場所に居合わせること。" },
+            { word: "五里霧中", reading: "ごりむちゅう", meaning: "どうしていいか分からず迷うこと。" },
+            { word: "再三再四", reading: "さいさんさいし", meaning: "何度も何度も繰り返すこと。" },
+            { word: "自画自賛", reading: "じがじさん", meaning: "自分のしたことを自分でほめること。" },
+            { word: "自給自足", reading: "じきゅうじそく", meaning: "必要なものを自分で作ってまかなうこと。" },
+            { word: "事実無根", reading: "じじつむこん", meaning: "全く根拠がない、嘘のこと。" },
+            { word: "支離滅裂", reading: "しりめつれつ", meaning: "まとまりがなく、めちゃくちゃな様子。" },
+            { word: "終始一貫", reading: "しゅうしいっかん", meaning: "最初から最後まで変わらないこと。" },
+            { word: "熟慮断行", reading: "じゅくりょだんこう", meaning: "よく考えてから思い切って実行すること。" },
+            { word: "千変万化", reading: "せんぺんばんか", meaning: "さまざまに変化すること。" },
+            { word: "天真爛漫", reading: "てんしんらんまん", meaning: "明るく純真で無邪気なこと。" },
+            { word: "波乱万丈", reading: "はらんばんじょう", meaning: "変化が激しく、ドラマチックなこと。" },
+            { word: "百戦錬磨", reading: "ひゃくせんれんま", meaning: "多くの経験を積んで鍛えられていること。" },
+            { word: "不言実行", reading: "ふげんじっこう", meaning: "黙って実行すること。" },
+            { word: "満身創痍", reading: "まんしんそうい", meaning: "体中傷だらけであること。" },
+            { word: "竜頭蛇尾", reading: "りゅうとうだび", meaning: "最初は勢いがいいが、最後は振るわないこと。" },
+            { word: "臨機応変", reading: "りんきおうへん", meaning: "状況に応じて適切に動くこと。" },
+            { word: "猿も木から落ちる", reading: "さるもきからおちる", meaning: "名人でも失敗することがある。" },
+            { word: "急がば回れ", reading: "いそがばまわれ", meaning: "急ぐときこそ、着実な道を選べ。" },
+            { word: "棚からぼた餅", reading: "たなからぼたもち", meaning: "思いがけない幸運が舞い込むこと。" },
+            { word: "石の上にも三年", reading: "いしのうえにもさんねん", meaning: "辛くても続ければ必ず報われる。" },
+            { word: "井の中の蛙", reading: "いのなかのかわず", meaning: "自分の狭い知識にとらわれ広い世界を知らない。" },
+            { word: "出る杭は打たれる", reading: "でるくいはうたれる", meaning: "目立つ人は他人から邪魔をされやすい。" },
+            { word: "笑う門には福来たる", reading: "わらうかどにはふくきたる", meaning: "いつも明るくいれば幸運が訪れる。" },
+            { word: "七転び八起き", reading: "ななころびやおき", meaning: "何度失敗してもくじけずに立ち上がること。" },
+            { word: "百発百中", reading: "ひゃっぱつひゃくちゅう", meaning: "予想や計画がすべて的中すること。" },
+            { word: "果報は寝て待て", reading: "かほうはねてまて", meaning: "幸運は焦らずに待つのが良い。" },
+            { word: "情けは人のためならず", reading: "なさけはひとのためならず", meaning: "親切は巡り巡って自分に返ってくる。" },
+            { word: "塵も積もれば山となる", reading: "ちりもつもればやまとなる", meaning: "小さなことでも積み重なれば大きな力になる。" },
+            { word: "二兎を追う者は一兎をも得ず", reading: "にとをおうものはいっとをもえず", meaning: "欲張るとどちらも失敗する。" },
+            { word: "千里の道も一歩から", reading: "せんりのみちもいっぽから", meaning: "大きな仕事も手近な所から始まる。" },
+            { word: "備えあれば憂いなし", reading: "そなえあればうれいなし", meaning: "準備をしておけば、万一の時も安心。" },
+            { word: "可愛い子には旅をさせよ", reading: "かわいいこにはたびをさせよ", meaning: "大切なら甘やかさず苦労をさせるべきだ。" },
+            { word: "負けるが勝ち", reading: "まけるがかち", meaning: "争いを避けて譲るほうが結局は得。" },
+            { word: "海老で鯛を釣る", reading: "えびでたいをつる", meaning: "小さな元手で大きな利益を得ること。" },
+            { word: "聞くは一時の恥", reading: "きくはいっときのはじ", meaning: "知らないことを聞くのは恥ずかしくない。" },
+            { word: "弘法筆を選ばず", reading: "こうぼうふでをえらばず", meaning: "達人は道具に関係なく立派に仕事をこなす。" },
+            { word: "三人寄れば文殊の知恵", reading: "さんにんよればもんじゅのちえ", meaning: "凡人でも三人集まれば良い知恵が出る。" },
+            { word: "灯台下暗し", reading: "とうだいもとくらし", meaning: "身近なことはかえって気づきにくいもの。" },
+            { word: "泣きっ面に蜂", reading: "なきっつらにはち", meaning: "悪いことが重なって起こること。" },
+            { word: "焼け石に水", reading: "やけいしにみず", meaning: "努力が少なすぎて全く効果がないこと。" },
+            { word: "渡る世間に鬼はなし", reading: "わたるせけにおにはなし", meaning: "世の中には冷たい人ばかりではない。" },
+            { word: "犬も歩けば棒に当たる", reading: "いぬもあるけばぼうにあたる", meaning: "動けば災難に合うが幸運にも会う。" },
+            { word: "取らぬ狸の皮算用", reading: "とらぬたぬきのかわざんよう", meaning: "不確実なことをあてにして計画を立てること。" },
+            { word: "猫の手も借りたい", reading: "ねこのてもかりたい", meaning: "非常に忙しくて人手が足りない様子。" },
+            { word: "虎穴に入らずんば虎子を得ず", reading: "こけつにいらずんばこじをえず", meaning: "危険を冒さなければ成功は得られない。" },
+            { word: "豚に真珠", reading: "ぶたにしんじゅ", meaning: "価値のわからない者に高価なものを与える例え。" },
+            { word: "残り物には福がある", reading: "のこりものにはふくがある", meaning: "人が取り残したものに幸運がある。" },
+            { word: "嘘も方便", reading: "うそもほうべん", meaning: "物事を円滑に進めるためには嘘も必要な時がある。" },
+            { word: "壁に耳あり障子に目あり", reading: "かべにみみありしょうじにめあり", meaning: "秘密は漏れやすいものだという戒め。" },
+            { word: "亀の甲より年の功", reading: "かめのこうよりとしのこう", meaning: "年長者の経験は尊重すべきだということ。" },
+            { word: "隣の芝生は青い", reading: "となりのしばふはあおい", meaning: "他人のものは何でも良く見えること。" },
+            { word: "どんぐりの背比べ", reading: "どんぐりのせくらべ", meaning: "どれも似たり寄ったりで、優れた者がいない。" },
+            { word: "能ある鷹は爪を隠す", reading: "のうあるたかはつめをかくす", meaning: "実力のある人ほどそれを誇示しない。" },
+            { word: "花より団子", reading: "はなよりだんご", meaning: "外見の華やかさより実利を重視すること。" },
+            { word: "まかぬ種は生えぬ", reading: "まかぬたねははえぬ", meaning: "努力をしなければ結果は得られない。" },
+            { word: "良薬は口に苦し", reading: "りょうやくはくちににがし", meaning: "忠告は聞くのが辛いが身のためになる。" },
+            { word: "早起きは三文の徳", reading: "はやおきはさんもんのとく", meaning: "早起きをすると何かしら良いことがある。" },
+            { word: "一寸先は闇", reading: "いっすんさきはやみ", meaning: "未来のことは全く予測できないものだ。" },
+            { word: "継続は力なり", reading: "けいぞくはちからなり", meaning: "地道に続けることが大きな成果に繋がる。" },
+            { word: "時は金なり", reading: "ときはかねなり", meaning: "時間は貴重なので無駄にしてはいけない。" },
+            { word: "失敗は成功のもと", reading: "しっぱいはせいこうのもと", meaning: "失敗から学ぶことで成功へ近づける。" },
+            { word: "類は友を呼ぶ", reading: "るいはともをよぶ", meaning: "似た者同士は自然と集まるものだ。" },
+            { word: "言わぬが花", reading: "いわぬがはな", meaning: "口に出さないほうがかえって趣がある。" },
+            { word: "待てば海路の日和あり", reading: "まてばかいろのひよりあり", meaning: "焦らず待てば必ず良い機会が訪れる。" },
+            { word: "焼肉定食", reading: "やきにくていしょく", meaning: "油の塊"},
+            { word: "任天堂", reading: "にんてんどう", meaning: "日本のゲーム会社"},
+            { word: "黒猫", reading: "くろねこ", meaning: "かわいい"},
+            { word: "猫に小判", reading: "ねこにこばん", meaning: "なんぼでも貢いだりますよ！（価値のわからない者に高価なものを与えても無駄であることのたとえ。）"},
+            { word: "深淵を覗くとき、深淵もまたこちらを覗いているのだ", reading: "しんえんをのぞくとき、しんえんもまたこちらをのぞいているのだ", meaning: "長すぎる"},
+            { word: "逃げるが勝ち", reading: "にげるがかち", meaning: "弱者の主張"},
+            { word: "熟語再構築", reading: "じゅくごさいこうちく", meaning: "「熟語」再構築（？）"},
+            { word: "炭酸水", reading: "たんさんすい", meaning: "しゅわしゅわ"},
+            { word: "天然水", reading: "てんねんすい", meaning: "美味しい、、、らしい"},
+            { word: "本末転倒", reading: "本末転倒", meaning: "（大事なこととつまらないことを取り違える）"},
+            { word: "画竜点睛", reading: "がりょうてんせい", meaning: "物事を完成させるための、最後の大事な仕上げ。" },
+            { word: "海千山千", reading: "うみせんやません", meaning: "経験が豊富で、世の中の裏表を知り尽くして悪賢いこと。" },
+            { word: "隔靴掻痒", reading: "かっかそうよう", meaning: "物事の核心に触れず、もどかしい思いをすること。" },
+            { word: "勧善懲悪", reading: "かんぜんちょうあく", meaning: "善を勧め、悪を懲らしめること。" },
+            { word: "危機一髪", reading: "ききいっぱつ", meaning: "非常に危険な、瀬戸際の瞬間。" },
+            { word: "漁夫の利", reading: "ぎょふのり", meaning: "当事者同士が争っている間に、第三者が利益を得ること。" },
+            { word: "金科玉条", reading: "きんかぎょくじょう", meaning: "絶対のよりどころとして、守らなければならない規則。" },
+            { word: "孤軍奮闘", reading: "こぐんふんとう", meaning: "助けがない中で、一人で懸命に努力すること。" },
+            { word: "三日坊主", reading: "みっかぼうず", meaning: "飽きやすくて、物事が長続きしないこと。" },
+            { word: "周知徹底", reading: "しゅうちてってい", meaning: "隅々まで、広く知らせて行き届かせること。" },
+            { word: "小心翼翼", reading: "しょうしんよくよく", meaning: "気が小さくて、びくびくしている様子。" },
+            { word: "先手必勝", reading: "せんてひっしょう", meaning: "相手より先に攻撃を仕掛ければ、必ず勝てるということ。" },
+            { word: "道聴塗説", reading: "どうちょうとせつ", meaning: "聞いたばかりの話を、すぐ他人に吹聴すること。" },
+            { word: "難攻不落", reading: "なんこうふらく", meaning: "攻めにくくて、なかなか陥落しないこと。" },
+            { word: "博覧強記", reading: "はくらんきょうき", meaning: "広く書物を読み、物事をよく覚えていること。" },
+            { word: "和洋折衷", reading: "わようせっちゅう", meaning: "日本風と西洋風を、ほどよく取り合わせること。" },
+            { word: "一朝一夕", reading: "いっちょういっせき", meaning: "わずかな時間。短い期間。" },
+            { word: "呉下阿蒙", reading: "ごかのあもう", meaning: "いつまでも進歩のない者のこと。" },
+            { word: "千軍万馬", reading: "せんぐんばんば", meaning: "多くの実戦を経験しており、非常に強いこと。" },
+        ];
+
+        // 状態管理
+        let idiomData = [];
+        let idiomDeck = [];
+        let currentStage = 1;
+        let score = 0;
+        let lapCount = 1;
+        let comboCount = 0;
+        let currentIdiom = null;
+        let draggedElement = null;
+        let startPos = { offsetX: 0, offsetY: 0 };
+        let solvedIdioms = [];
+        let showFavoritesOnly = false;
+
+        const scatterArea = document.getElementById('scatter-area');
+        const answerArea = document.getElementById('answer-area');
+        const nextBtn = document.getElementById('next-btn');
+        const rerollBtn = document.getElementById('reroll-btn');
+        const checkBtn = document.getElementById('check-btn');
+        const messageArea = document.getElementById('message-area');
+        const scoreDisplay = document.getElementById('score-display');
+        const levelDisplay = document.getElementById('current-level-display');
+        const archiveScreen = document.getElementById('archive-screen');
+        const archiveList = document.getElementById('archive-list');
+        const emptyArchiveMsg = document.getElementById('empty-archive-msg');
+        const remainingDisplay = document.getElementById('remaining-count');
+
+        // --- セーブ & ロード機能 ---
+
+        function saveGame() {
+            const saveData = {
+                score: score,
+                currentStage: currentStage,
+                lapCount: lapCount,
+                clearedWords: idiomData.filter(i => i.cleared).map(i => i.word),
+                favorites: solvedIdioms.filter(i => i.isFavorite).map(i => i.word),
+                solvedIdiomsList: solvedIdioms // 詳細な意味データも含めて保存
+            };
+            localStorage.setItem('idiomGameSave', JSON.stringify(saveData));
+        }
+
+        function loadGame() {
+            const saved = localStorage.getItem('idiomGameSave');
+            
+            // idiomDataの初期化
+            idiomData = baseIdiomData.map(item => ({ ...item, cleared: false }));
+            
+            if (saved) {
+                const data = JSON.parse(saved);
+                lapCount = data.lapCount || 1;
+                score = data.score || 0;
+                currentStage = data.currentStage || 1;
+                
+                // クリア済フラグの復元
+                if (data.clearedWords) {
+                    data.clearedWords.forEach(word => {
+                        const target = idiomData.find(i => i.word === word);
+                        if (target) target.cleared = true;
+                    });
+                }
+                
+                // 熟語帳の復元
+                solvedIdioms = data.solvedIdiomsList || [];
+                
+                // お気に入り状態の同期
+                if (data.favorites) {
+                    solvedIdioms.forEach(s => {
+                        s.isFavorite = data.favorites.includes(s.word);
+                    });
+                }
+
+                scoreDisplay.innerText = score;
+                levelDisplay.innerText = currentStage;
+            }
+            updateRemainingCount();
+        }
+
+        function resetGameData() {
+            if (confirm("【確認1/2】本当に全てのセーブデータをリセットしますか？\nこれまでの進捗が全て消去されます。")) {
+                if (confirm("【確認2/2】最終確認です。本当によろしいですか？\nこの操作は取り消せません。")) {
+                    localStorage.removeItem('idiomGameSave');
+                    location.reload(); // ページをリロードして初期状態に戻す
+                }
+            }
+        }
+
+        // --- ゲームロジック ---
+
+        function startGame() {
+            loadGame(); // ゲーム開始時にロード
+            document.getElementById('start-menu').style.display = 'none';
+            loadLevel();
+        }
+
+        function toggleDarkMode() {
+            const body = document.body;
+            const uiArea = document.getElementById('ui-top-area');
+            const isDark = body.classList.toggle('dark-mode');
+            if (isDark) {
+                body.style.backgroundColor = '#1e293b';
+                body.style.color = '#f8fafc';
+                uiArea.style.backgroundColor = '#1e293b';
+                scatterArea.style.backgroundColor = '#0f172a';
+            } else {
+                body.style.backgroundColor = '#f0f4f8';
+                body.style.color = '#1e293b';
+                uiArea.style.backgroundColor = 'white';
+                scatterArea.style.backgroundColor = '#f8fafc';
+            }
+        }
+
+        function toggleFavorite(word) {
+            const target = solvedIdioms.find(i => i.word === word);
+            if (target) {
+                target.isFavorite = !target.isFavorite;
+                saveGame(); // お気に入り変更時に保存
+                updateArchiveView(document.getElementById('archive-search').value);
+            }
+        }
+
+        function getNextIdiom() {
+    // 1. まず、まだクリアしていない熟語だけを抽出します
+    let uncleared = idiomData.filter(i => !i.cleared);
+
+    // 2. もし未クリアが一つもなければ（＝全クリアの状態）
+    if (uncleared.length === 0) {
+        // 【ここがポイント！】全データのクリアフラグを false（未クリア）にリセットします
+        idiomData.forEach(i => i.cleared = false);
+        
+        // 3. リセットしたので、もう一度「未クリア」を抽出し直します（これで全員分になります）
+        uncleared = idiomData.filter(i => !i.cleared);
+        lapCount++;
+        
+        // 任意：リセットしたことをプレイヤーに伝えるならここでalert等を入れる
+        console.log("全問題を解き終えたので、クリア判定をリセットしました！");
+    }
+
+    // 4. 山札（idiomDeck）が空の場合、現在の未クリアリストから新しい山札を作ります
+    if (idiomDeck.length === 0) {
+        idiomDeck = [...uncleared].sort(() => Math.random() - 0.5);
+    }
+
+    // 5. 山札から1問取り出して返します
+    return idiomDeck.pop();
+}
+
+        function updateRemainingCount() {
+            const clearedCount = idiomData.filter(i => i.cleared).length;
+            remainingDisplay.innerText = `Cleared: ${clearedCount} / ${idiomData.length}`;
+            const lapText = lapCount > 1 ? ` (${lapCount}周目)` : "";
+            levelDisplay.innerText = `${currentStage}${lapText}`;
+        }
+
+        function loadLevel() {
+            currentIdiom = getNextIdiom();
+            updateRemainingCount();
+            levelDisplay.innerText = currentStage;
+            document.getElementById('word-info').innerText = `正解：${currentIdiom.word.length}文字`;
+            answerArea.innerHTML = '';
+            scatterArea.innerHTML = '';
+            messageArea.classList.add('hidden');
+            nextBtn.classList.add('hidden');
+            rerollBtn.classList.remove('hidden');
+            checkBtn.classList.remove('hidden');
+            document.getElementById('question-hint').innerText = `読み：${currentIdiom.reading}`;
+
+            for (let i = 0; i < currentIdiom.word.length; i++) {
+                const slot = document.createElement('div');
+                slot.className = 'drop-slot';
+                answerArea.appendChild(slot);
+            }
+
+            let allChars = currentIdiom.word.split('');
+            while(allChars.length < currentIdiom.word.length + 2) {
+                const d = dummyPool[Math.floor(Math.random() * dummyPool.length)];
+                if(!allChars.includes(d)) allChars.push(d);
+            }
+
+            allChars.sort(() => Math.random() - 0.5).forEach((char) => {
+    const card = document.createElement('div');
+    card.className = 'kanji-card kanji-font';
+    card.innerText = char;
+    scatterArea.appendChild(card);
+    
+    const rect = scatterArea.getBoundingClientRect();
+    const cardW = 50; 
+    
+    // X座標：左右に10pxの余白
+    const x = Math.random() * (rect.width - cardW - 20) + 10;
+    
+    // Y座標：上部に10px、★下部に60px★の余白を空けるように変更
+    // これにより、カードが画面下部のバーに重なりにくくなります
+    const bottomMargin = 60; 
+    const availableHeight = rect.height - cardW - 10 - bottomMargin;
+    const y = Math.random() * (availableHeight > 0 ? availableHeight : 10) + 10;
+    
+    card.style.left = `${x}px`;
+    card.style.top = `${y}px`;
+    card.style.transform = `rotate(${(Math.random() - 0.5) * 15}deg)`;
+
+    card.addEventListener('mousedown', startDragging);
+    card.addEventListener('touchstart', startDragging, { passive: false });
+});
+        }
+
+        function startDragging(e) {
+            e.preventDefault();
+            draggedElement = e.currentTarget;
+            if (draggedElement.classList.contains('returning')) return;
+            playSound('pick');
+            const cx = e.type.includes('touch') ? e.touches[0].clientX : e.clientX;
+            const cy = e.type.includes('touch') ? e.touches[0].clientY : e.clientY;
+            const rect = draggedElement.getBoundingClientRect();
+            startPos.offsetX = cx - rect.left; startPos.offsetY = cy - rect.top;
+            draggedElement.classList.remove('placed');
+            draggedElement.classList.add('dragging');
+            updateDragPosition(cx, cy);
+            window.addEventListener('mousemove', onMove);
+            window.addEventListener('mouseup', stopDragging);
+            window.addEventListener('touchmove', onMove, { passive: false });
+            window.addEventListener('touchend', stopDragging);
+        }
+
+        function onMove(e) {
+            if (!draggedElement) return;
+            const cx = e.type.includes('touch') ? e.touches[0].clientX : e.clientX;
+            const cy = e.type.includes('touch') ? e.touches[0].clientY : e.clientY;
+            updateDragPosition(cx, cy);
+            document.querySelectorAll('.drop-slot').forEach(slot => {
+                const r = slot.getBoundingClientRect();
+                if (cx > r.left && cx < r.right && cy > r.top && cy < r.bottom) slot.classList.add('active');
+                else slot.classList.remove('active');
+            });
+        }
+
+        function updateDragPosition(x, y) {
+            draggedElement.style.left = `${x - startPos.offsetX}px`;
+            draggedElement.style.top = `${y - startPos.offsetY}px`;
+        }
+
+        function stopDragging(e) {
+            if (!draggedElement) return;
+            const cx = e.type.includes('touch') ? e.changedTouches[0].clientX : e.clientX;
+            const cy = e.type.includes('touch') ? e.changedTouches[0].clientY : e.clientY;
+            const scatterRect = scatterArea.getBoundingClientRect();
+            let foundSlot = null;
+            document.querySelectorAll('.drop-slot').forEach(slot => {
+                const r = slot.getBoundingClientRect();
+                if (cx > r.left && cx < r.right && cy > r.top && cy < r.bottom && slot.children.length === 0) foundSlot = slot;
+                slot.classList.remove('active');
+            });
+            draggedElement.classList.remove('dragging');
+            if (foundSlot) {
+                playSound('drop');
+                draggedElement.style.position = 'relative';
+                draggedElement.style.left = '0'; draggedElement.style.top = '0';
+                draggedElement.style.transform = 'none';
+                draggedElement.classList.add('placed');
+                foundSlot.appendChild(draggedElement);
+            } else {
+                playSound('drop');
+                draggedElement.style.position = 'absolute';
+                scatterArea.appendChild(draggedElement);
+                const cardW = draggedElement.offsetWidth || 50;
+const padding = 10;
+const bottomMarginLimit = 60; // 下から60px以内には止まらないようにする
+
+let nx = cx - scatterRect.left - startPos.offsetX;
+let ny = cy - scatterRect.top - startPos.offsetY;
+
+// X軸の制限
+if (nx < padding) nx = padding;
+if (nx > scatterRect.width - cardW - padding) nx = scatterRect.width - cardW - padding;
+
+// Y軸の制限（下部のマージンを考慮）
+if (ny < padding) ny = padding;
+if (ny > scatterRect.height - cardW - bottomMarginLimit) ny = scatterRect.height - cardW - bottomMarginLimit;
+
+draggedElement.classList.add('returning');
+draggedElement.style.left = `${nx}px`;
+draggedElement.style.top = `${ny}px`;
+                draggedElement.style.transform = `rotate(${(Math.random() - 0.5) * 15}deg)`;
+                const el = draggedElement;
+                setTimeout(() => el.classList.remove('returning'), 300);
+            }
+            window.removeEventListener('mousemove', onMove); window.removeEventListener('mouseup', stopDragging);
+            window.removeEventListener('touchmove', onMove); window.removeEventListener('touchend', stopDragging);
+            draggedElement = null;
+        }
+
+        checkBtn.onclick = () => {
+            const slots = document.querySelectorAll('.drop-slot');
+            const result = Array.from(slots).map(s => s.children[0]?.innerText || '').join('');
+            if (result === currentIdiom.word) {
+                playSound('correct');
+                comboCount++;
+                const bonus = comboCount > 1 ? comboCount * 10 : 0;
+                score += (currentIdiom.word.length * 20) + bonus;
+                scoreDisplay.innerText = score;
+                if (currentIdiom) {
+    currentIdiom.cleared = true; 
+}
+                if (!solvedIdioms.find(i => i.word === currentIdiom.word)) {
+                    solvedIdioms.unshift({...currentIdiom, isFavorite: false});
+                }
+                messageArea.classList.remove('hidden');
+                nextBtn.classList.remove('hidden');
+                rerollBtn.classList.add('hidden');
+                checkBtn.classList.add('hidden');
+                document.getElementById('answer-reading').innerText = 
+                    `${comboCount > 1 ? comboCount + '連続正解！ ' : ''}${currentIdiom.word}`;
+                document.getElementById('answer-meaning').innerText = currentIdiom.meaning;
+                updateRemainingCount();
+                saveGame(); // クリア時に自動セーブ
+            } else {
+                playSound('wrong');
+                comboCount = 0;
+                answerArea.style.transform = 'translateX(10px)';
+                setTimeout(() => { answerArea.style.transform = 'translateX(0)'; }, 100);
+            }
+        };
+
+        function updateArchiveView(filterText = '') {
+            if (!archiveList) return;
+            const filtered = solvedIdioms.filter(h => {
+                const matchesSearch = h.word.includes(filterText) || h.reading.includes(filterText);
+                const matchesFav = showFavoritesOnly ? h.isFavorite : true;
+                return matchesSearch && matchesFav;
+            });
+            if (filtered.length > 0) {
+                emptyArchiveMsg.style.display = 'none';
+                archiveList.innerHTML = filtered.map(h => `
+                    <div class="p-4 border-b border-gray-100 flex justify-between items-center">
+                        <div class="flex-grow">
+                            <div class="flex justify-between items-baseline">
+                                <span class="text-xl font-bold kanji-font text-indigo-800">${h.word}</span>
+                                <span class="text-xs text-gray-500">${h.reading}</span>
+                            </div>
+                            <p class="text-sm text-gray-700 mt-1">${h.meaning}</p>
+                        </div>
+                        <button onclick="toggleFavorite('${h.word}')" class="ml-4 text-2xl transition-transform active:scale-125">
+                            ${h.isFavorite ? '⭐' : '☆'}
+                        </button>
+                    </div>
+                `).join('');
+            } else {
+                emptyArchiveMsg.style.display = 'block';
+                archiveList.innerHTML = '';
+                emptyArchiveMsg.innerText = showFavoritesOnly ? 'お気に入りに登録された熟語はありません' : 
+                                           (filterText ? '一致する熟語が見つかりません' : 'まだクリアした問題がありません');
+            }
+        }
+
+        // イベントリスナー
+        document.getElementById('reset-save-btn').onclick = resetGameData;
+        document.getElementById('fav-filter-btn').onclick = (e) => {
+            showFavoritesOnly = !showFavoritesOnly;
+            e.target.innerText = showFavoritesOnly ? '⭐' : '☆';
+            updateArchiveView(document.getElementById('archive-search').value);
+        };
+        document.getElementById('archive-search').addEventListener('input', (e) => updateArchiveView(e.target.value));
+        document.getElementById('open-archive-btn').onclick = () => {
+            document.getElementById('archive-search').value = '';
+            updateArchiveView();
+            archiveScreen.style.display = 'flex';
+        };
+        document.getElementById('close-archive-btn').onclick = () => archiveScreen.style.display = 'none';
+        nextBtn.onclick = () => { 
+    saveGame(); // まず保存
+    setTimeout(() => { // ほんの少しだけ待ってから次へ
+        currentStage++; 
+        loadLevel(); 
+    }, 50);
+};
+        rerollBtn.onclick = () => { comboCount = 0; loadLevel(); };
+
+        // ページ読み込み時にデータ復元
+        loadGame();
+    </script>
+</body>
+</html>
