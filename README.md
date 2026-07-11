@@ -1,6 +1,6 @@
 # jukugo-rebulding
 プレイはこちらから
-(https://akapikumindayo.github.io/jukugo-saikotiku/)
+(https://akapikumindayo.github.io/jukugo-rebulding/)
 
 概要
 お題の熟語を作るゲームです。
