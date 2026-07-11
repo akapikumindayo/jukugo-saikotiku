@@ -1,4 +1,4 @@
-# jukugo-saikotiku
+# jukugo-rebulding
 プレイはこちらから
 (https://akapikumindayo.github.io/jukugo-saikotiku/)
 
